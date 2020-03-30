@@ -1,452 +1,447 @@
-const Path = require('path')
-const FS = require('fs')
-const Assert = require('assert')
-const {performance} = require('perf_hooks')
-let Core // loaded later
+const Path = require('path');
+const FS = require('fs');
+const Assert = require('assert');
+const { performance } = require('perf_hooks');
+let Core; // loaded later
 
-exports.run = run
-exports.getBench = getBench
+exports.run = run;
+exports.getBench = getBench;
 
-const specsDir = Path.join(__dirname, 'specs')
-const defaultSettings = 
-    { language: 'plaintext'
-    , tabWidth: 4
-    , doubleSentenceSpacing: false
-    , reformat: false
-    , wholeComment: true
-    }
+const specsDir = Path.join(__dirname, 'specs');
+const defaultSettings = {
+    language: 'plaintext',
+    tabWidth: 4,
+    doubleSentenceSpacing: false,
+    reformat: false,
+    wholeComment: true,
+};
 
-const strWidthBefore = marker => s => {
-    const p = s.indexOf(marker)
-    return p < 0 ? -1 : Core.strWidth(1, s.substr(0, p))
-}
+const strWidthBefore = (marker) => (s) => {
+    const p = s.indexOf(marker);
+    return p < 0 ? -1 : Core.strWidth(1, s.substr(0, p));
+};
 
 /** Splits a string at a given column and returns a string tuple */
-const splitAtWidth = c => s => {
-    let width = 0, i
-    for(i = 0; i < s.length; i++) {
-        width += Core.strWidth(1, s[i])
-        if(width > c) break
+const splitAtWidth = (c) => (s) => {
+    let width = 0,
+        i;
+    for (i = 0; i < s.length; i++) {
+        width += Core.strWidth(1, s[i]);
+        if (width > c) break;
     }
-    return [s.substr(0, i), s.substr(i)]
-}
+    return [s.substr(0, i), s.substr(i)];
+};
 
-
-if(require.main === module) {
+if (require.main === module) {
     const cmdlineFileNames =
-        process.argv.length > 2 ? process.argv.slice(2) : null
+        process.argv.length > 2 ? process.argv.slice(2) : null;
 
-    if(!run(cmdlineFileNames)) { process.exitCode = -1 }
+    if (!run(cmdlineFileNames)) {
+        process.exitCode = -1;
+    }
 }
 
-function run(fileNames) 
-{
-    reloadModules()
+function run(fileNames) {
+    reloadModules();
 
-    const tests = getTests(fileNames)
+    const tests = getTests(fileNames);
 
-    const startTime = performance.now()
-    const failures = runTests(tests)
-    const timeTaken = Math.round(performance.now() - startTime)
+    const startTime = performance.now();
+    const failures = runTests(tests);
+    const timeTaken = Math.round(performance.now() - startTime);
 
-    if(failures.length) {
+    if (failures.length) {
         failures
             .reduce((xs, x) => [...xs, '', ...x], [])
-            .forEach(s => console.log(s))
+            .forEach((s) => console.log(s));
 
-        console.log()
-        console.log(`${tests.length} ${testOrTests(tests.length)} run`)
-        console.log(`${failures.length} ${testOrTests(failures.length)} failed.`)
-    }
-    else {
-        console.log()       
-        console.log(`${tests.length} ${testOrTests(tests.length)} run`)
-        console.log(`All ${testOrTests(tests.length)} passed (${timeTaken} ms).`)
+        console.log();
+        console.log(`${tests.length} ${testOrTests(tests.length)} run`);
+        console.log(
+            `${failures.length} ${testOrTests(failures.length)} failed.`
+        );
+    } else {
+        console.log();
+        console.log(`${tests.length} ${testOrTests(tests.length)} run`);
+        console.log(
+            `All ${testOrTests(tests.length)} passed (${timeTaken} ms).`
+        );
     }
 
-    return !failures.length
+    return !failures.length;
 }
-
 
 function getBench() {
-    reloadModules()
-    const tests = getTests()
-    
+    reloadModules();
+    const tests = getTests();
+
     return function() {
-        runTests(tests)
-    }
+        runTests(tests);
+    };
 }
 
-
-function reloadModules() 
-{
-    function deleteModule(moduleName)
-    {
-        const solvedName = require.resolve(moduleName)
-        const nodeModule = require.cache[solvedName]
+function reloadModules() {
+    function deleteModule(moduleName) {
+        const solvedName = require.resolve(moduleName);
+        const nodeModule = require.cache[solvedName];
         if (nodeModule) {
-            delete require.cache[solvedName]
+            delete require.cache[solvedName];
             for (let i = nodeModule.children.length - 1; i >= 0; i--) {
                 deleteModule(nodeModule.children[i].filename);
             }
         }
     }
 
-    deleteModule('./vscode/compiled/Core/Main')
-    Core = require('./vscode/compiled/Core/Main')
+    deleteModule('./vscode/compiled/Core/Main');
+    Core = require('./vscode/compiled/Core/Main');
 }
 
-
-function testOrTests(n)
-{
-    return n == 1 ? "test" : "tests"
+function testOrTests(n) {
+    return n == 1 ? 'test' : 'tests';
 }
 
+function getSpecFiles(dir) {
+    dir = dir || specsDir;
+    const children = FS.readdirSync(dir).map((n) => Path.join(dir, n));
 
-function getSpecFiles(dir)
-{
-    dir = dir || specsDir
-    const children = FS.readdirSync(dir).map(n => Path.join(dir, n))
-
-    const specFiles = children.filter(n => n.match(/\.md$/))
-    const subDirs = children.filter(n => FS.statSync(n).isDirectory())
-    return subDirs.map(getSpecFiles).reduce((xs, x) => [...xs, ...x], specFiles)
+    const specFiles = children.filter((n) => n.match(/\.md$/));
+    const subDirs = children.filter((n) => FS.statSync(n).isDirectory());
+    return subDirs
+        .map(getSpecFiles)
+        .reduce((xs, x) => [...xs, ...x], specFiles);
 }
 
-
-function getTests(fileNames) 
-{
-    fileNames = fileNames || getSpecFiles()
+function getTests(fileNames) {
+    fileNames = fileNames || getSpecFiles();
     return fileNames
         .map(readSamplesInFile)
         .reduce((xs, x) => [...xs, ...x], []) // Concat tests
-        .map(({fileName, settings, lines}) => 
-            Object.assign(
-                { fileName, settings }, readTestLines(lines)
-            )
-        )
+        .map(({ fileName, settings, lines }) =>
+            Object.assign({ fileName, settings }, readTestLines(lines))
+        );
 }
 
-
-function readSamplesInFile(fileName) 
-{
+function readSamplesInFile(fileName) {
     // Files should not have a BOM, or detecting a test or settings line on the
     // first line will fail.
-    const lines = FS.readFileSync(fileName, { encoding: 'utf8' }).split(/\r?\n/)
-    return loop([], defaultSettings, null, lines)
+    const lines = FS.readFileSync(fileName, { encoding: 'utf8' }).split(
+        /\r?\n/
+    );
+    return loop([], defaultSettings, null, lines);
 
-    function loop(output, settings, sampleLines, remainingLines)
-    {
-        const [line, ...nextRemainingLines] = remainingLines
-        const hasSampleLines = sampleLines && sampleLines.length
-        const thisLineIsNotASampleLine = line == null || !line.startsWith("    ")
-        const nextOutput = 
+    function loop(output, settings, sampleLines, remainingLines) {
+        const [line, ...nextRemainingLines] = remainingLines;
+        const hasSampleLines = sampleLines && sampleLines.length;
+        const thisLineIsNotASampleLine =
+            line == null || !line.startsWith('    ');
+        const nextOutput =
             hasSampleLines && thisLineIsNotASampleLine
-                ? [...output, {fileName, settings, lines: sampleLines} ]
-                : output
+                ? [...output, { fileName, settings, lines: sampleLines }]
+                : output;
 
         // End of file
-        if(line == null) {
-            return nextOutput
+        if (line == null) {
+            return nextOutput;
         }
         // Blank line: allow sample to start after this
-        else if(line.trim().length === 0) {
-            return loop(nextOutput, settings, [], nextRemainingLines)
+        else if (line.trim().length === 0) {
+            return loop(nextOutput, settings, [], nextRemainingLines);
         }
         // Possible sample line: add it to buffer if was following a blank line
-        else if(line.startsWith("    ")) {
-            const nextSampleLines = sampleLines ? [...sampleLines, line] : null
-            return loop(nextOutput, settings, nextSampleLines, nextRemainingLines)
+        else if (line.startsWith('    ')) {
+            const nextSampleLines = sampleLines
+                ? [...sampleLines, line]
+                : null;
+            return loop(
+                nextOutput,
+                settings,
+                nextSampleLines,
+                nextRemainingLines
+            );
         }
         // Settings line
-        else if(line.startsWith("> ")) {
-            return loop(nextOutput, readSettings(line), null, nextRemainingLines)
+        else if (line.startsWith('> ')) {
+            return loop(
+                nextOutput,
+                readSettings(line),
+                null,
+                nextRemainingLines
+            );
         }
         // Any other line
         else {
-            return loop(nextOutput, settings, null, nextRemainingLines)
+            return loop(nextOutput, settings, null, nextRemainingLines);
         }
     }
 }
 
-
-function readSettings(line) 
-{
-    const settings = eval("({" + line.substr(1) + "})")
-    return Object.assign({}, defaultSettings, settings)
+function readSettings(line) {
+    const settings = eval('({' + line.substr(1) + '})');
+    return Object.assign({}, defaultSettings, settings);
 }
 
+function readTestLines(lines) {
+    let [inputLines, outputLines] = splitLines('->', lines);
 
-function readTestLines(lines) 
-{
-    let [inputLines, outputLines] =
-        splitLines('->', lines)
-
-    if(!outputLines) {
+    if (!outputLines) {
         return {
-            err: "No expected output",
-            input : cleanUp(inputLines),
-        }
+            err: 'No expected output',
+            input: cleanUp(inputLines),
+        };
     }
 
-    [outputLines, reformattedLines] =
-        splitLines('-or-', outputLines)
+    [outputLines, reformattedLines] = splitLines('-or-', outputLines);
 
-    const wrappingColumn =
-        getWrappingColumn(inputLines)
+    const wrappingColumn = getWrappingColumn(inputLines);
 
     return {
-        err: wrappingColumn == -1 ? "Wrapping column" : undefined,
+        err: wrappingColumn == -1 ? 'Wrapping column' : undefined,
         input: cleanUp(inputLines),
         expected: cleanUp(outputLines),
         reformatted: cleanUp(reformattedLines),
         wrappingColumn,
-        selections: getSelections(inputLines)
-    }
+        selections: getSelections(inputLines),
+    };
 
     /** Splits a group of lines with the given marker. The marker can be on any line */
-    function splitLines(marker, lines)
-    {
-        const splitPoint = 
-            Math.max(...lines.map(strWidthBefore(marker)))
+    function splitLines(marker, lines) {
+        const splitPoint = Math.max(...lines.map(strWidthBefore(marker)));
         return splitPoint < 0
             ? [lines, null]
             : lines
-                .map(splitAtWidth(splitPoint + marker.length))
-                // Convert list of tuples to tuple of lists
-                .reduce(([xs, ys], [x, y]) => [[...xs, x], [...ys, y]], [[], []])
-                .map(removeIndent)
+                  .map(splitAtWidth(splitPoint + marker.length))
+                  // Convert list of tuples to tuple of lists
+                  .reduce(
+                      ([xs, ys], [x, y]) => [
+                          [...xs, x],
+                          [...ys, y],
+                      ],
+                      [[], []]
+                  )
+                  .map(removeIndent);
     }
 
     /** Removes any indent whitespace that is common to all lines */
-    function removeIndent(lines) 
-    {
-        const indents = 
-           lines
-                .filter(l => l.match(/\S/))
-                .map(l => l.match(/\s*/)[0].length)
-        const minIndent =
-            Math.min(...indents)
+    function removeIndent(lines) {
+        const indents = lines
+            .filter((l) => l.match(/\S/))
+            .map((l) => l.match(/\s*/)[0].length);
+        const minIndent = Math.min(...indents);
 
-        return lines.map(l => l.substr(minIndent))
+        return lines.map((l) => l.substr(minIndent));
     }
 
-    function getWrappingColumn(lines)
-    {
-        const positions = lines.map(strWidthBefore('¦')).filter(x => x > 0)
+    function getWrappingColumn(lines) {
+        const positions = lines.map(strWidthBefore('¦')).filter((x) => x > 0);
 
-        return positions.length && positions.every(p => p == positions[0])
-            ? positions[0] 
-            : -1
+        return positions.length && positions.every((p) => p == positions[0])
+            ? positions[0]
+            : -1;
     }
 
-    function getSelections(lines) 
-    {
+    function getSelections(lines) {
         // Make copy for mutation
-        lines = [ ...lines ]
-        const selections = []
-        let selection = {}
+        lines = [...lines];
+        const selections = [];
+        let selection = {};
 
-        for(let i = 0; i < lines.length; i++) {
-            const match = lines[i].match(/[«»]/)
-            if(match) {
-                pos = { line : i, character: match.index }
-                if(match[0] == '«') selection.anchor = pos
-                else selection.active = pos
+        for (let i = 0; i < lines.length; i++) {
+            const match = lines[i].match(/[«»]/);
+            if (match) {
+                pos = { line: i, character: match.index };
+                if (match[0] == '«') selection.anchor = pos;
+                else selection.active = pos;
 
-                lines[i] = 
+                lines[i] =
                     lines[i].substr(0, match.index) +
-                    lines[i].substr(match.index + 1)
-                i--
+                    lines[i].substr(match.index + 1);
+                i--;
             }
 
-            if(selection.anchor && selection.active) {
-                selections.push(selection)
-                selection = {}
+            if (selection.anchor && selection.active) {
+                selections.push(selection);
+                selection = {};
             }
         }
 
-        if(selections.length > 0) {
-            return selections
-        }
-        else {
-            return [ {
-                anchor: { line: 0, character: 0 },
-                active: { line: lines.length, character: 0 },
-            } ]
+        if (selections.length > 0) {
+            return selections;
+        } else {
+            return [
+                {
+                    anchor: { line: 0, character: 0 },
+                    active: { line: lines.length, character: 0 },
+                },
+            ];
         }
     }
-
 
     /** Removes special characters and trailing whitespace */
-    function cleanUp(lines) 
-    {
-        if(!lines) return null
-        else return lines
-            .map(line =>
-                line
-                    .replace(/ ->(?=\s*$)/, '   ')
-                    .replace(/-or-/, '    ')
-                    .replace(/¦/g, ' ')
-                    .replace(/[«»]/g, '')
-                    .replace(/\s+$/, '')
-                    .replace(/·/g, ' ')
-                    .replace(/-*→/g, '\t')
-            )
-            // Trim empty lines off end
-            .reduceRight
-                ( (ls, l) => l || ls.length ? [l, ...ls] : []
-                , []
-                )
-        
+    function cleanUp(lines) {
+        if (!lines) return null;
+        else
+            return (
+                lines
+                    .map((line) =>
+                        line
+                            .replace(/ ->(?=\s*$)/, '   ')
+                            .replace(/-or-/, '    ')
+                            .replace(/¦/g, ' ')
+                            .replace(/[«»]/g, '')
+                            .replace(/\s+$/, '')
+                            .replace(/·/g, ' ')
+                            .replace(/-*→/g, '\t')
+                    )
+                    // Trim empty lines off end
+                    .reduceRight(
+                        (ls, l) => (l || ls.length ? [l, ...ls] : []),
+                        []
+                    )
+            );
     }
 }
 
 /**
  * Runs the given tests and returns any failures
  */
-function runTests(tests)
-{
-    const failures =
-        tests.map(runTest).filter(f => !!f)
+function runTests(tests) {
+    const failures = tests.map(runTest).filter((f) => !!f);
 
-    return failures
+    return failures;
 
     /** Runs a test and returns a failure object if it fails, otherwise null */
-    function runTest({err, fileName, input, expected, reformatted, settings, selections, wrappingColumn}) 
-    {
-        let actual
-        
-        if(err) {
-            return printError(err)
-        }
-        else {
-            if(reformatted) {
-                let [normalResult, reformatResult] =
-                    [false, true]
-                        .map(reformat => 
-                            runTest({
-                                input,
-                                fileName,
-                                expected: reformat ? reformatted : expected,
-                                settings: Object.assign({}, settings, { reformat }),
-                                selections,
-                                wrappingColumn,
-                            })
-                        )
+    function runTest({
+        err,
+        fileName,
+        input,
+        expected,
+        reformatted,
+        settings,
+        selections,
+        wrappingColumn,
+    }) {
+        let actual;
 
-                if(!normalResult && !reformatResult)
-                    return null
-                else
-                    return (normalResult || []).concat(reformatResult || [])
+        if (err) {
+            return printError(err);
+        } else {
+            if (reformatted) {
+                let [normalResult, reformatResult] = [false, true].map(
+                    (reformat) =>
+                        runTest({
+                            input,
+                            fileName,
+                            expected: reformat ? reformatted : expected,
+                            settings: Object.assign({}, settings, {
+                                reformat,
+                            }),
+                            selections,
+                            wrappingColumn,
+                        })
+                );
+
+                if (!normalResult && !reformatResult) return null;
+                else return (normalResult || []).concat(reformatResult || []);
             }
         }
 
         try {
-            const getLine = i => i < input.length ? input[i] : null
-            const edit =
-                Core.rewrap
-                    ( { language: settings.language, path: '' }
-                    , Object.assign(settings, { column: wrappingColumn })
-                    , selections
-                    , getLine
-                    )
-            actual = applyEdit(edit, input)
-        }
-        catch(err) {
-            return printError(err)
+            const getLine = (i) => (i < input.length ? input[i] : null);
+            const edit = Core.rewrap(
+                { language: settings.language, path: '' },
+                Object.assign(settings, { column: wrappingColumn }),
+                selections,
+                getLine
+            );
+            actual = applyEdit(edit, input);
+        } catch (err) {
+            return printError(err);
         }
 
         try {
-            Assert.deepEqual(actual, expected)
-            return null
-        }
-        catch(err) {
-            return printError()
+            Assert.deepEqual(actual, expected);
+            return null;
+        } catch (err) {
+            return printError();
         }
 
-        function printError(err)
-        {
+        function printError(err) {
             return [
-                "Fail: " + (err || "Output not expected"),
+                'Fail: ' + (err || 'Output not expected'),
                 fileName,
                 JSON.stringify(settings),
-                ...printTest
-                    ( input
-                    , expected = expected || []
-                    , actual = actual || []
-                    , wrappingColumn
-                    , settings.tabWidth
-                    ),
-            ]
+                ...printTest(
+                    input,
+                    (expected = expected || []),
+                    (actual = actual || []),
+                    wrappingColumn,
+                    settings.tabWidth
+                ),
+            ];
         }
     }
 }
 
-function applyEdit(edit, lines)
-{
-    const copy = Array.from(lines)
-    const length = edit.endLine - edit.startLine + 1 
-    copy.splice(edit.startLine, length, ...edit.lines)
-    return copy
+function applyEdit(edit, lines) {
+    const copy = Array.from(lines);
+    const length = edit.endLine - edit.startLine + 1;
+    copy.splice(edit.startLine, length, ...edit.lines);
+    return copy;
 }
 
+function printTest(input, expected, actual, width, tabWidth) {
+    const output = [];
+    const columns = [input, expected, actual];
+    const columnLengths = columns.map((c) => c.length);
+    const lineCount = Math.max(...columnLengths);
 
-function printTest(input, expected, actual, width, tabWidth) 
-{
-    const output = []
-    const columns = [input, expected, actual]
-    const columnLengths = columns.map(c => c.length)
-    const lineCount = Math.max(...columnLengths)
-
-    if(width == -1) {
-        output.push("Error: no wrapping column set (with '¦')")
-        output.push(...input)
-        return output
+    if (width == -1) {
+        output.push("Error: no wrapping column set (with '¦')");
+        output.push(...input);
+        return output;
     }
 
-    const headers = 
-        ["Input", "Expected", "Actual"]
-            .map((s, i) => s + " (" + columnLengths[i] + ")")
-    print(headers)
+    const headers = ['Input', 'Expected', 'Actual'].map(
+        (s, i) => s + ' (' + columnLengths[i] + ')'
+    );
+    print(headers);
 
-    print(['-', '-', '-'].map(s => s.repeat(width)))
+    print(['-', '-', '-'].map((s) => s.repeat(width)));
 
-    for(let i = 0; i < lineCount; i++) {
+    for (let i = 0; i < lineCount; i++) {
         const parts = columns
-            .map(c => c[i] || '')
-            .map(s => s.replace(/ /g, '·'))
-            .map(showTabs)
-        print(parts)
+            .map((c) => c[i] || '')
+            .map((s) => s.replace(/ /g, '·'))
+            .map(showTabs);
+        print(parts);
     }
 
-    return output
+    return output;
 
     function print(parts) {
         const line = parts
-            .map(s => s || '')
+            .map((s) => s || '')
             .map(padRight)
-            .join(' | ')
-        output.push(' ' + line + ' ')
+            .join(' | ');
+        output.push(' ' + line + ' ');
     }
 
     function padRight(s) {
-        s = splitAtWidth(width)(s)[0]
-        return s + " ".repeat(width - Core.strWidth(1, s))
+        s = splitAtWidth(width)(s)[0];
+        return s + ' '.repeat(width - Core.strWidth(1, s));
     }
 
-    function showTabs(str)
-    {
-        const symbol =
-            '-'.repeat(tabWidth - 1) + '→'
-        const parts = 
-            str.split('\t')
+    function showTabs(str) {
+        const symbol = '-'.repeat(tabWidth - 1) + '→';
+        const parts = str.split('\t');
         return parts
             .map((x, i) =>
                 i < parts.length - 1
-                     ? x + '-'.repeat(tabWidth - x.length % tabWidth - 1) + '→'
-                     : x
+                    ? x +
+                      '-'.repeat(tabWidth - (x.length % tabWidth) - 1) +
+                      '→'
+                    : x
             )
-            .join('')
+            .join('');
     }
 }
